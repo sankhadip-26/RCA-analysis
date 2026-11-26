@@ -1,0 +1,909 @@
+WITH date_range AS (
+  SELECT
+    DATE '2026-08-01' AS start_date,
+    DATE '2026-11-22' AS end_date
+),
+
+-- =====================================================
+-- 1. SALES BASE
+-- =====================================================
+
+base AS (
+  SELECT
+    DATE(oo.create_date + INTERVAL 330 MINUTE) AS order_date,
+    nt.division AS division,
+    pb.name AS brand,
+    pp.variant_id AS style_code,
+
+    SAFE_CAST(oi.quantity AS NUMERIC) AS quantity,
+    SAFE_CAST(oi.sp AS NUMERIC) AS sp,
+    SAFE_CAST(oi.brand_offer_sp AS NUMERIC) AS brand_offer_sp
+
+  FROM `slikk-prod.slikkprodpublic.order_order` oo
+
+  JOIN `slikk-prod.slikkprodpublic.order_orderitem` oi
+    ON oo.id = oi.order_id
+
+  JOIN `slikk-prod.slikkprodpublic.product_product` pp
+    ON pp.id = oi.product_id
+
+  JOIN `slikk-prod.slikkprodpublic.product_brand` pb
+    ON pb.id = pp.brand_id
+
+  JOIN `slikk-prod.slikksilver.product_tags` pt
+    ON pt.product_id = pp.id
+
+  LEFT JOIN `slikk-prod.slikkanalytics.silver_new_product_tags` nt
+    ON nt.product_id = pp.id
+
+  CROSS JOIN date_range d
+
+  WHERE
+    oo.status NOT IN ('OPEN', 'FAILED')
+    AND oo.delivery_type != 'EXCHANGE'
+    AND DATE(oo.create_date + INTERVAL 330 MINUTE) >= d.start_date
+    AND DATE(oo.create_date + INTERVAL 330 MINUTE) < d.end_date
+    AND LOWER(TRIM(nt.division)) = 'footwear'
+    AND LOWER(TRIM(pb.name)) IN ('campus', 'liberty', 'red tape')
+    AND pp.variant_id IS NOT NULL
+),
+
+-- =====================================================
+-- 2. STYLE-WISE SALES + AVERAGE BRAND OFFER SP
+-- =====================================================
+
+style_sales AS (
+  SELECT
+    division,
+    brand,
+    style_code,
+
+    -- AUG WEEK 1
+    SUM(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07', quantity, 0)) AS aug_w1_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07', sp * quantity, 0)) AS aug_w1_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07', sp, NULL)) AS aug_w1_avg_sp,
+    AVG(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07', brand_offer_sp, NULL)) AS aug_w1_brand_offer_sp,
+    -- AUG WEEK 2
+    SUM(IF(order_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14', quantity, 0)) AS aug_w2_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14', sp * quantity, 0)) AS aug_w2_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14', sp, NULL)) AS aug_w2_avg_sp,
+    AVG(IF(order_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14', brand_offer_sp, NULL)) AS aug_w2_brand_offer_sp,
+    -- AUG WEEK 3
+    SUM(IF(order_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21', quantity, 0)) AS aug_w3_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21', sp * quantity, 0)) AS aug_w3_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21', sp, NULL)) AS aug_w3_avg_sp,
+    AVG(IF(order_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21', brand_offer_sp, NULL)) AS aug_w3_brand_offer_sp,
+    -- AUG TOTAL (FIRST 21 DAYS)
+    SUM(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21', quantity, 0)) AS aug_total_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21', sp * quantity, 0)) AS aug_total_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21', sp, NULL)) AS aug_total_avg_sp,
+    AVG(IF(order_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21', brand_offer_sp, NULL)) AS aug_total_brand_offer_sp,
+
+    -- SEPTEMBER WEEK 1
+    SUM(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07',
+      quantity, 0)) AS sep_w1_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07',
+      sp * quantity, 0)) AS sep_w1_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07', sp, NULL)) AS sep_w1_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07', brand_offer_sp, NULL)) AS sep_w1_brand_offer_sp,
+
+    -- SEPTEMBER WEEK 2
+    SUM(IF(order_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14',
+      quantity, 0)) AS sep_w2_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14',
+      sp * quantity, 0)) AS sep_w2_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14', sp, NULL)) AS sep_w2_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14', brand_offer_sp, NULL)) AS sep_w2_brand_offer_sp,
+
+    -- SEPTEMBER WEEK 3
+    SUM(IF(order_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21',
+      quantity, 0)) AS sep_w3_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21',
+      sp * quantity, 0)) AS sep_w3_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21', sp, NULL)) AS sep_w3_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21', brand_offer_sp, NULL)) AS sep_w3_brand_offer_sp,
+
+    -- SEPTEMBER TOTAL
+    SUM(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21',
+      quantity, 0)) AS sep_total_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21',
+      sp * quantity, 0)) AS sep_total_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21', sp, NULL)) AS sep_total_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21', brand_offer_sp, NULL)) AS sep_total_brand_offer_sp,
+
+    -- OCTOBER WEEK 1
+    SUM(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07',
+      quantity, 0)) AS oct_w1_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07',
+      sp * quantity, 0)) AS oct_w1_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07', sp, NULL)) AS oct_w1_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07', brand_offer_sp, NULL)) AS oct_w1_brand_offer_sp,
+
+    -- OCTOBER WEEK 2
+    SUM(IF(order_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14',
+      quantity, 0)) AS oct_w2_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14',
+      sp * quantity, 0)) AS oct_w2_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14', sp, NULL)) AS oct_w2_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14', brand_offer_sp, NULL)) AS oct_w2_brand_offer_sp,
+
+    -- OCTOBER WEEK 3
+    SUM(IF(order_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21',
+      quantity, 0)) AS oct_w3_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21',
+      sp * quantity, 0)) AS oct_w3_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21', sp, NULL)) AS oct_w3_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21', brand_offer_sp, NULL)) AS oct_w3_brand_offer_sp,
+
+    -- OCTOBER TOTAL
+    SUM(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21',
+      quantity, 0)) AS oct_total_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21',
+      sp * quantity, 0)) AS oct_total_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21', sp, NULL)) AS oct_total_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21', brand_offer_sp, NULL)) AS oct_total_brand_offer_sp,
+
+    -- NOVEMBER WEEK 1
+    SUM(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07',
+      quantity, 0)) AS nov_w1_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07',
+      sp * quantity, 0)) AS nov_w1_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07', sp, NULL)) AS nov_w1_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07', brand_offer_sp, NULL)) AS nov_w1_brand_offer_sp,
+
+    -- NOVEMBER WEEK 2
+    SUM(IF(order_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14',
+      quantity, 0)) AS nov_w2_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14',
+      sp * quantity, 0)) AS nov_w2_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14', sp, NULL)) AS nov_w2_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14', brand_offer_sp, NULL)) AS nov_w2_brand_offer_sp,
+
+    -- NOVEMBER WEEK 3
+    SUM(IF(order_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21',
+      quantity, 0)) AS nov_w3_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21',
+      sp * quantity, 0)) AS nov_w3_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21', sp, NULL)) AS nov_w3_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21', brand_offer_sp, NULL)) AS nov_w3_brand_offer_sp,
+
+    -- NOVEMBER TOTAL
+    SUM(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21',
+      quantity, 0)) AS nov_total_qty,
+    SUM(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21',
+      sp * quantity, 0)) AS nov_total_gmv,
+    AVG(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21', sp, NULL)) AS nov_total_avg_sp,
+
+    AVG(IF(order_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21', brand_offer_sp, NULL)) AS nov_total_brand_offer_sp
+
+  FROM base
+  GROUP BY division, brand, style_code
+),
+
+-- =====================================================
+-- 3. INVENTORY: SKU + COMPANY + DATE + STORE
+-- =====================================================
+
+sku_in_stock_days AS (
+  SELECT
+    sku,
+    company_code,
+    create_date,
+    store_code,
+    SUM(quantity) AS qty
+
+  FROM `slikk-prod.slikkprodpublic.product_inventorysnapshot`
+
+  WHERE
+    create_date >= DATE '2026-08-01'
+    AND create_date <= DATE '2026-11-21'
+
+  GROUP BY 1, 2, 3, 4
+),
+
+-- =====================================================
+-- 4. MAP INVENTORY SKU TO STYLE CODE
+-- SUM ACROSS ALL SKUS, COMPANIES AND STORES
+-- =====================================================
+
+inventory_style_day AS (
+  SELECT
+    nt.division,
+    pb.name AS brand,
+    pp.variant_id AS style_code,
+    inv.create_date AS stock_date,
+    SUM(SAFE_CAST(inv.qty AS NUMERIC)) AS daily_stock
+
+  FROM sku_in_stock_days inv
+
+  JOIN `slikk-prod.slikkprodpublic.product_product` pp
+    ON LOWER(TRIM(CAST(inv.sku AS STRING))) =
+       LOWER(TRIM(CAST(pp.sku AS STRING)))
+
+  JOIN `slikk-prod.slikkprodpublic.product_brand` pb
+    ON pb.id = pp.brand_id
+
+  LEFT JOIN `slikk-prod.slikkanalytics.silver_new_product_tags` nt
+    ON nt.product_id = pp.id
+
+  WHERE
+    LOWER(TRIM(nt.division)) = 'footwear'
+    AND LOWER(TRIM(pb.name)) IN ('campus', 'liberty', 'red tape')
+    AND pp.variant_id IS NOT NULL
+
+  GROUP BY
+    nt.division,
+    pb.name,
+    pp.variant_id,
+    inv.create_date
+),
+
+-- =====================================================
+-- 5. CALENDAR FOR SALES STYLES
+-- ENSURES MISSING SNAPSHOT DAYS COUNT AS ZERO
+-- =====================================================
+
+style_calendar AS (
+  SELECT
+    s.division,
+    s.brand,
+    s.style_code,
+    stock_date
+
+  FROM (
+    SELECT DISTINCT division, brand, style_code
+    FROM style_sales
+  ) s
+
+  CROSS JOIN UNNEST(
+    GENERATE_DATE_ARRAY(DATE '2026-08-01', DATE '2026-11-21')
+  ) AS stock_date
+),
+
+-- =====================================================
+-- 6. AVERAGE DAILY INVENTORY BY STYLE AND PERIOD
+-- =====================================================
+
+style_inventory AS (
+  SELECT
+    c.division,
+    c.brand,
+    c.style_code,
+
+    -- AUGUST WEEKLY AND TOTAL
+    AVG(IF(c.stock_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07', COALESCE(i.daily_stock, 0), NULL)) AS aug_w1_avg_inventory,
+    AVG(IF(c.stock_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14', COALESCE(i.daily_stock, 0), NULL)) AS aug_w2_avg_inventory,
+    AVG(IF(c.stock_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21', COALESCE(i.daily_stock, 0), NULL)) AS aug_w3_avg_inventory,
+    AVG(IF(c.stock_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21', COALESCE(i.daily_stock, 0), NULL)) AS aug_total_avg_inventory,
+
+    -- SEPTEMBER WEEKLY AND TOTAL
+    AVG(IF(c.stock_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07',
+      COALESCE(i.daily_stock, 0), NULL)) AS sep_w1_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14',
+      COALESCE(i.daily_stock, 0), NULL)) AS sep_w2_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS sep_w3_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS sep_total_avg_inventory,
+
+    -- OCTOBER WEEKLY AND TOTAL
+    AVG(IF(c.stock_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07',
+      COALESCE(i.daily_stock, 0), NULL)) AS oct_w1_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14',
+      COALESCE(i.daily_stock, 0), NULL)) AS oct_w2_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS oct_w3_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS oct_total_avg_inventory,
+
+    -- NOVEMBER WEEKLY AND TOTAL
+    AVG(IF(c.stock_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07',
+      COALESCE(i.daily_stock, 0), NULL)) AS nov_w1_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14',
+      COALESCE(i.daily_stock, 0), NULL)) AS nov_w2_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS nov_w3_avg_inventory,
+
+    AVG(IF(c.stock_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21',
+      COALESCE(i.daily_stock, 0), NULL)) AS nov_total_avg_inventory
+
+  FROM style_calendar c
+
+  LEFT JOIN inventory_style_day i
+    ON c.division = i.division
+    AND c.brand = i.brand
+    AND c.style_code = i.style_code
+    AND c.stock_date = i.stock_date
+
+  GROUP BY
+    c.division,
+    c.brand,
+    c.style_code
+),
+
+-- =====================================================
+-- 7. COMBINE PDP AND ATC EVENTS
+-- =====================================================
+
+all_events AS (
+  SELECT
+    'PDP' AS event_type,
+    LOWER(TRIM(product_id)) AS event_product_id,
+    DATE(create_date) AS event_date
+  FROM `slikk-prod.slikksilver.silver_pdp_events`
+  WHERE
+    DATE(create_date) BETWEEN DATE '2026-08-01' AND DATE '2026-11-21'
+    AND product_id IS NOT NULL
+
+  UNION ALL
+
+  SELECT
+    'ATC' AS event_type,
+    LOWER(TRIM(product_id)) AS event_product_id,
+    DATE(create_date) AS event_date
+  FROM `slikk-prod.slikksilver.silver_add_to_cart_events`
+  WHERE
+    DATE(create_date) BETWEEN DATE '2026-08-01' AND DATE '2026-11-21'
+    AND product_id IS NOT NULL
+),
+
+-- =====================================================
+-- 8. EVENT PRODUCT MAPPING: SKID > SKU > BARCODE
+-- =====================================================
+
+product_mapping AS (
+  SELECT
+    event_product_id,
+    product_id
+  FROM (
+    SELECT
+      e.event_product_id,
+      pp.id AS product_id,
+
+      ROW_NUMBER() OVER (
+        PARTITION BY e.event_product_id
+        ORDER BY
+          CASE
+            WHEN e.event_product_id = LOWER(TRIM(pp.skid)) THEN 1
+            WHEN e.event_product_id = LOWER(TRIM(pp.sku)) THEN 2
+            WHEN e.event_product_id = LOWER(TRIM(pp.barcode)) THEN 3
+          END,
+          pp.id
+      ) AS rn
+
+    FROM (
+      SELECT DISTINCT event_product_id
+      FROM all_events
+    ) e
+
+    JOIN `slikk-prod.slikkprodpublic.product_product` pp
+      ON e.event_product_id = LOWER(TRIM(pp.skid))
+      OR e.event_product_id = LOWER(TRIM(pp.sku))
+      OR e.event_product_id = LOWER(TRIM(pp.barcode))
+  )
+  WHERE rn = 1
+),
+
+mapped_events AS (
+  SELECT
+    e.event_type,
+    e.event_date,
+    pm.product_id
+  FROM all_events e
+  JOIN product_mapping pm
+    ON e.event_product_id = pm.event_product_id
+),
+
+-- =====================================================
+-- 9. DEDUPLICATED PRODUCT TAGS FOR EVENTS
+-- =====================================================
+
+tags AS (
+  SELECT
+    product_id,
+    ANY_VALUE(division) AS division
+  FROM `slikk-prod.slikkanalytics.silver_new_product_tags`
+  GROUP BY product_id
+),
+
+-- =====================================================
+-- 10. STYLE-WISE WEEKLY AND MONTHLY PDP / ATC
+-- =====================================================
+
+style_events AS (
+  SELECT
+    t.division,
+    pb.name AS brand,
+    pp.variant_id AS style_code,
+
+    -- AUGUST WEEKLY AND TOTAL
+    COUNTIF(event_type = 'PDP' AND event_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07') AS aug_w1_pdp,
+    COUNTIF(event_type = 'ATC' AND event_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-07') AS aug_w1_atc,
+    COUNTIF(event_type = 'PDP' AND event_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14') AS aug_w2_pdp,
+    COUNTIF(event_type = 'ATC' AND event_date BETWEEN DATE '2026-08-08' AND DATE '2026-08-14') AS aug_w2_atc,
+    COUNTIF(event_type = 'PDP' AND event_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21') AS aug_w3_pdp,
+    COUNTIF(event_type = 'ATC' AND event_date BETWEEN DATE '2026-08-15' AND DATE '2026-08-21') AS aug_w3_atc,
+    COUNTIF(event_type = 'PDP' AND event_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21') AS aug_total_pdp,
+    COUNTIF(event_type = 'ATC' AND event_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-21') AS aug_total_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07')
+      AS sep_w1_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-07')
+      AS sep_w1_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14')
+      AS sep_w2_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-09-08' AND DATE '2026-09-14')
+      AS sep_w2_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21')
+      AS sep_w3_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-09-15' AND DATE '2026-09-21')
+      AS sep_w3_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21')
+      AS sep_total_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-21')
+      AS sep_total_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07')
+      AS oct_w1_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-07')
+      AS oct_w1_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14')
+      AS oct_w2_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-10-08' AND DATE '2026-10-14')
+      AS oct_w2_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21')
+      AS oct_w3_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-10-15' AND DATE '2026-10-21')
+      AS oct_w3_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21')
+      AS oct_total_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-21')
+      AS oct_total_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07')
+      AS nov_w1_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-07')
+      AS nov_w1_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14')
+      AS nov_w2_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-11-08' AND DATE '2026-11-14')
+      AS nov_w2_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21')
+      AS nov_w3_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-11-15' AND DATE '2026-11-21')
+      AS nov_w3_atc,
+
+    COUNTIF(event_type = 'PDP'
+      AND event_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21')
+      AS nov_total_pdp,
+    COUNTIF(event_type = 'ATC'
+      AND event_date BETWEEN DATE '2026-11-01' AND DATE '2026-11-21')
+      AS nov_total_atc
+
+  FROM mapped_events e
+
+  JOIN `slikk-prod.slikkprodpublic.product_product` pp
+    ON pp.id = e.product_id
+
+  JOIN `slikk-prod.slikkprodpublic.product_brand` pb
+    ON pb.id = pp.brand_id
+
+  LEFT JOIN tags t
+    ON t.product_id = pp.id
+
+  WHERE
+    LOWER(TRIM(t.division)) = 'footwear'
+    AND LOWER(TRIM(pb.name)) IN ('campus', 'liberty', 'red tape')
+    AND pp.variant_id IS NOT NULL
+
+  GROUP BY
+    t.division,
+    pb.name,
+    pp.variant_id
+),
+
+-- =====================================================
+-- 11. COMBINE SALES + INVENTORY + PDP / ATC
+-- =====================================================
+
+combined AS (
+  SELECT
+    s.*,
+
+    -- INVENTORY
+    i.aug_w1_avg_inventory,
+    i.aug_w2_avg_inventory,
+    i.aug_w3_avg_inventory,
+    i.aug_total_avg_inventory,
+
+    i.sep_w1_avg_inventory,
+    i.sep_w2_avg_inventory,
+    i.sep_w3_avg_inventory,
+    i.sep_total_avg_inventory,
+
+    i.oct_w1_avg_inventory,
+    i.oct_w2_avg_inventory,
+    i.oct_w3_avg_inventory,
+    i.oct_total_avg_inventory,
+
+    i.nov_w1_avg_inventory,
+    i.nov_w2_avg_inventory,
+    i.nov_w3_avg_inventory,
+    i.nov_total_avg_inventory,
+
+    -- PDP / ATC
+    COALESCE(e.aug_w1_pdp, 0) AS aug_w1_pdp,
+    COALESCE(e.aug_w1_atc, 0) AS aug_w1_atc,
+    COALESCE(e.aug_w2_pdp, 0) AS aug_w2_pdp,
+    COALESCE(e.aug_w2_atc, 0) AS aug_w2_atc,
+    COALESCE(e.aug_w3_pdp, 0) AS aug_w3_pdp,
+    COALESCE(e.aug_w3_atc, 0) AS aug_w3_atc,
+    COALESCE(e.aug_total_pdp, 0) AS aug_total_pdp,
+    COALESCE(e.aug_total_atc, 0) AS aug_total_atc,
+    COALESCE(e.sep_w1_pdp, 0) AS sep_w1_pdp,
+    COALESCE(e.sep_w1_atc, 0) AS sep_w1_atc,
+    COALESCE(e.sep_w2_pdp, 0) AS sep_w2_pdp,
+    COALESCE(e.sep_w2_atc, 0) AS sep_w2_atc,
+    COALESCE(e.sep_w3_pdp, 0) AS sep_w3_pdp,
+    COALESCE(e.sep_w3_atc, 0) AS sep_w3_atc,
+    COALESCE(e.sep_total_pdp, 0) AS sep_total_pdp,
+    COALESCE(e.sep_total_atc, 0) AS sep_total_atc,
+
+    COALESCE(e.oct_w1_pdp, 0) AS oct_w1_pdp,
+    COALESCE(e.oct_w1_atc, 0) AS oct_w1_atc,
+    COALESCE(e.oct_w2_pdp, 0) AS oct_w2_pdp,
+    COALESCE(e.oct_w2_atc, 0) AS oct_w2_atc,
+    COALESCE(e.oct_w3_pdp, 0) AS oct_w3_pdp,
+    COALESCE(e.oct_w3_atc, 0) AS oct_w3_atc,
+    COALESCE(e.oct_total_pdp, 0) AS oct_total_pdp,
+    COALESCE(e.oct_total_atc, 0) AS oct_total_atc,
+
+    COALESCE(e.nov_w1_pdp, 0) AS nov_w1_pdp,
+    COALESCE(e.nov_w1_atc, 0) AS nov_w1_atc,
+    COALESCE(e.nov_w2_pdp, 0) AS nov_w2_pdp,
+    COALESCE(e.nov_w2_atc, 0) AS nov_w2_atc,
+    COALESCE(e.nov_w3_pdp, 0) AS nov_w3_pdp,
+    COALESCE(e.nov_w3_atc, 0) AS nov_w3_atc,
+    COALESCE(e.nov_total_pdp, 0) AS nov_total_pdp,
+    COALESCE(e.nov_total_atc, 0) AS nov_total_atc
+
+  FROM style_sales s
+
+  LEFT JOIN style_inventory i
+    ON s.division = i.division
+    AND s.brand = i.brand
+    AND s.style_code = i.style_code
+
+  LEFT JOIN style_events e
+    ON s.division = e.division
+    AND s.brand = e.brand
+    AND s.style_code = e.style_code
+),
+
+-- =====================================================
+-- 12. COMBINED GMV AND BRAND-WISE RANKING
+-- =====================================================
+
+ranked AS (
+  SELECT
+    *,
+
+    aug_total_gmv + sep_total_gmv + oct_total_gmv + nov_total_gmv AS total_gmv,
+
+    SUM(aug_total_gmv + sep_total_gmv + oct_total_gmv + nov_total_gmv) OVER (
+      PARTITION BY brand
+      ORDER BY
+        aug_total_gmv + sep_total_gmv + oct_total_gmv + nov_total_gmv DESC,
+        CAST(style_code AS STRING)
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_gmv,
+
+    SUM(aug_total_gmv + sep_total_gmv + oct_total_gmv + nov_total_gmv) OVER (
+      PARTITION BY brand
+    ) AS brand_total_gmv
+
+  FROM combined
+),
+
+-- =====================================================
+-- 13. GRADING
+-- =====================================================
+
+graded AS (
+  SELECT
+    *,
+    SAFE_DIVIDE(cumulative_gmv, brand_total_gmv) AS cumulative_gmv_share,
+
+    CASE
+      WHEN SAFE_DIVIDE(cumulative_gmv, brand_total_gmv) <= 0.30 THEN 'A'
+      WHEN SAFE_DIVIDE(cumulative_gmv, brand_total_gmv) <= 0.55 THEN 'B'
+      WHEN SAFE_DIVIDE(cumulative_gmv, brand_total_gmv) <= 0.75 THEN 'C'
+      WHEN SAFE_DIVIDE(cumulative_gmv, brand_total_gmv) <= 0.90 THEN 'D'
+      ELSE 'E'
+    END AS grade
+
+  FROM ranked
+)
+
+-- =====================================================
+-- 14. FINAL OUTPUT
+-- Existing KPIs + Average Inventory + Average Brand Offer SP
+-- =====================================================
+
+SELECT
+  division,
+  brand,
+  CAST(style_code AS STRING) AS style_code,
+
+  -- AUGUST WEEK 1
+  aug_w1_qty,
+  ROUND(aug_w1_gmv / 100000, 2) AS aug_w1_gmv_lakhs,
+  aug_w1_pdp,
+  aug_w1_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w1_atc, aug_w1_pdp) * 100, 0), 2) AS aug_w1_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w1_qty, aug_w1_pdp) * 100, 0), 2) AS aug_w1_cvr_pct,
+  ROUND(aug_w1_avg_inventory, 2) AS aug_w1_avg_inventory,
+  ROUND(aug_w1_avg_sp, 2) AS aug_w1_avg_sp,
+  ROUND(aug_w1_brand_offer_sp, 2) AS aug_w1_avg_brand_offer_sp,
+
+  -- AUGUST WEEK 2
+  aug_w2_qty,
+  ROUND(aug_w2_gmv / 100000, 2) AS aug_w2_gmv_lakhs,
+  aug_w2_pdp,
+  aug_w2_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w2_atc, aug_w2_pdp) * 100, 0), 2) AS aug_w2_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w2_qty, aug_w2_pdp) * 100, 0), 2) AS aug_w2_cvr_pct,
+  ROUND(aug_w2_avg_inventory, 2) AS aug_w2_avg_inventory,
+  ROUND(aug_w2_avg_sp, 2) AS aug_w2_avg_sp,
+  ROUND(aug_w2_brand_offer_sp, 2) AS aug_w2_avg_brand_offer_sp,
+
+  -- AUGUST WEEK 3
+  aug_w3_qty,
+  ROUND(aug_w3_gmv / 100000, 2) AS aug_w3_gmv_lakhs,
+  aug_w3_pdp,
+  aug_w3_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w3_atc, aug_w3_pdp) * 100, 0), 2) AS aug_w3_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_w3_qty, aug_w3_pdp) * 100, 0), 2) AS aug_w3_cvr_pct,
+  ROUND(aug_w3_avg_inventory, 2) AS aug_w3_avg_inventory,
+  ROUND(aug_w3_avg_sp, 2) AS aug_w3_avg_sp,
+  ROUND(aug_w3_brand_offer_sp, 2) AS aug_w3_avg_brand_offer_sp,
+
+  -- AUGUST TOTAL (FIRST 21 DAYS)
+  aug_total_qty,
+  ROUND(aug_total_gmv / 100000, 2) AS aug_total_gmv_lakhs,
+  aug_total_pdp,
+  aug_total_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_total_atc, aug_total_pdp) * 100, 0), 2) AS aug_total_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(aug_total_qty, aug_total_pdp) * 100, 0), 2) AS aug_total_cvr_pct,
+  ROUND(aug_total_avg_inventory, 2) AS aug_total_avg_inventory,
+  ROUND(aug_total_avg_sp, 2) AS aug_total_avg_sp,
+  ROUND(aug_total_brand_offer_sp, 2) AS aug_total_avg_brand_offer_sp,
+
+  -- SEPTEMBER WEEK 1
+  sep_w1_qty,
+  ROUND(sep_w1_gmv / 100000, 2) AS sep_w1_gmv_lakhs,
+  sep_w1_pdp,
+  sep_w1_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w1_atc, sep_w1_pdp) * 100, 0), 2)
+    AS sep_w1_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w1_qty, sep_w1_pdp) * 100, 0), 2)
+    AS sep_w1_cvr_pct,
+  ROUND(sep_w1_avg_inventory, 2) AS sep_w1_avg_inventory,
+  ROUND(sep_w1_avg_sp, 2) AS sep_w1_avg_sp,
+
+  ROUND(sep_w1_brand_offer_sp, 2) AS sep_w1_avg_brand_offer_sp,
+
+  -- SEPTEMBER WEEK 2
+  sep_w2_qty,
+  ROUND(sep_w2_gmv / 100000, 2) AS sep_w2_gmv_lakhs,
+  sep_w2_pdp,
+  sep_w2_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w2_atc, sep_w2_pdp) * 100, 0), 2)
+    AS sep_w2_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w2_qty, sep_w2_pdp) * 100, 0), 2)
+    AS sep_w2_cvr_pct,
+  ROUND(sep_w2_avg_inventory, 2) AS sep_w2_avg_inventory,
+  ROUND(sep_w2_avg_sp, 2) AS sep_w2_avg_sp,
+
+  ROUND(sep_w2_brand_offer_sp, 2) AS sep_w2_avg_brand_offer_sp,
+
+  -- SEPTEMBER WEEK 3
+  sep_w3_qty,
+  ROUND(sep_w3_gmv / 100000, 2) AS sep_w3_gmv_lakhs,
+  sep_w3_pdp,
+  sep_w3_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w3_atc, sep_w3_pdp) * 100, 0), 2)
+    AS sep_w3_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_w3_qty, sep_w3_pdp) * 100, 0), 2)
+    AS sep_w3_cvr_pct,
+  ROUND(sep_w3_avg_inventory, 2) AS sep_w3_avg_inventory,
+  ROUND(sep_w3_avg_sp, 2) AS sep_w3_avg_sp,
+
+  ROUND(sep_w3_brand_offer_sp, 2) AS sep_w3_avg_brand_offer_sp,
+
+  -- SEPTEMBER TOTAL
+  sep_total_qty,
+  ROUND(sep_total_gmv / 100000, 2) AS sep_total_gmv_lakhs,
+  sep_total_pdp,
+  sep_total_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_total_atc, sep_total_pdp) * 100, 0), 2)
+    AS sep_total_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(sep_total_qty, sep_total_pdp) * 100, 0), 2)
+    AS sep_total_cvr_pct,
+  ROUND(sep_total_avg_inventory, 2) AS sep_total_avg_inventory,
+  ROUND(sep_total_avg_sp, 2) AS sep_total_avg_sp,
+
+  ROUND(sep_total_brand_offer_sp, 2) AS sep_total_avg_brand_offer_sp,
+
+  -- OCTOBER WEEK 1
+  oct_w1_qty,
+  ROUND(oct_w1_gmv / 100000, 2) AS oct_w1_gmv_lakhs,
+  oct_w1_pdp,
+  oct_w1_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w1_atc, oct_w1_pdp) * 100, 0), 2)
+    AS oct_w1_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w1_qty, oct_w1_pdp) * 100, 0), 2)
+    AS oct_w1_cvr_pct,
+  ROUND(oct_w1_avg_inventory, 2) AS oct_w1_avg_inventory,
+  ROUND(oct_w1_avg_sp, 2) AS oct_w1_avg_sp,
+
+  ROUND(oct_w1_brand_offer_sp, 2) AS oct_w1_avg_brand_offer_sp,
+
+  -- OCTOBER WEEK 2
+  oct_w2_qty,
+  ROUND(oct_w2_gmv / 100000, 2) AS oct_w2_gmv_lakhs,
+  oct_w2_pdp,
+  oct_w2_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w2_atc, oct_w2_pdp) * 100, 0), 2)
+    AS oct_w2_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w2_qty, oct_w2_pdp) * 100, 0), 2)
+    AS oct_w2_cvr_pct,
+  ROUND(oct_w2_avg_inventory, 2) AS oct_w2_avg_inventory,
+  ROUND(oct_w2_avg_sp, 2) AS oct_w2_avg_sp,
+
+  ROUND(oct_w2_brand_offer_sp, 2) AS oct_w2_avg_brand_offer_sp,
+
+  -- OCTOBER WEEK 3
+  oct_w3_qty,
+  ROUND(oct_w3_gmv / 100000, 2) AS oct_w3_gmv_lakhs,
+  oct_w3_pdp,
+  oct_w3_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w3_atc, oct_w3_pdp) * 100, 0), 2)
+    AS oct_w3_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_w3_qty, oct_w3_pdp) * 100, 0), 2)
+    AS oct_w3_cvr_pct,
+  ROUND(oct_w3_avg_inventory, 2) AS oct_w3_avg_inventory,
+  ROUND(oct_w3_avg_sp, 2) AS oct_w3_avg_sp,
+
+  ROUND(oct_w3_brand_offer_sp, 2) AS oct_w3_avg_brand_offer_sp,
+
+  -- OCTOBER TOTAL
+  oct_total_qty,
+  ROUND(oct_total_gmv / 100000, 2) AS oct_total_gmv_lakhs,
+  oct_total_pdp,
+  oct_total_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_total_atc, oct_total_pdp) * 100, 0), 2)
+    AS oct_total_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(oct_total_qty, oct_total_pdp) * 100, 0), 2)
+    AS oct_total_cvr_pct,
+  ROUND(oct_total_avg_inventory, 2) AS oct_total_avg_inventory,
+  ROUND(oct_total_avg_sp, 2) AS oct_total_avg_sp,
+
+  ROUND(oct_total_brand_offer_sp, 2) AS oct_total_avg_brand_offer_sp,
+
+  -- NOVEMBER WEEK 1
+  nov_w1_qty,
+  ROUND(nov_w1_gmv / 100000, 2) AS nov_w1_gmv_lakhs,
+  nov_w1_pdp,
+  nov_w1_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w1_atc, nov_w1_pdp) * 100, 0), 2)
+    AS nov_w1_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w1_qty, nov_w1_pdp) * 100, 0), 2)
+    AS nov_w1_cvr_pct,
+  ROUND(nov_w1_avg_inventory, 2) AS nov_w1_avg_inventory,
+  ROUND(nov_w1_avg_sp, 2) AS nov_w1_avg_sp,
+
+  ROUND(nov_w1_brand_offer_sp, 2) AS nov_w1_avg_brand_offer_sp,
+
+  -- NOVEMBER WEEK 2
+  nov_w2_qty,
+  ROUND(nov_w2_gmv / 100000, 2) AS nov_w2_gmv_lakhs,
+  nov_w2_pdp,
+  nov_w2_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w2_atc, nov_w2_pdp) * 100, 0), 2)
+    AS nov_w2_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w2_qty, nov_w2_pdp) * 100, 0), 2)
+    AS nov_w2_cvr_pct,
+  ROUND(nov_w2_avg_inventory, 2) AS nov_w2_avg_inventory,
+  ROUND(nov_w2_avg_sp, 2) AS nov_w2_avg_sp,
+
+  ROUND(nov_w2_brand_offer_sp, 2) AS nov_w2_avg_brand_offer_sp,
+
+  -- NOVEMBER WEEK 3
+  nov_w3_qty,
+  ROUND(nov_w3_gmv / 100000, 2) AS nov_w3_gmv_lakhs,
+  nov_w3_pdp,
+  nov_w3_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w3_atc, nov_w3_pdp) * 100, 0), 2)
+    AS nov_w3_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_w3_qty, nov_w3_pdp) * 100, 0), 2)
+    AS nov_w3_cvr_pct,
+  ROUND(nov_w3_avg_inventory, 2) AS nov_w3_avg_inventory,
+  ROUND(nov_w3_avg_sp, 2) AS nov_w3_avg_sp,
+
+  ROUND(nov_w3_brand_offer_sp, 2) AS nov_w3_avg_brand_offer_sp,
+
+  -- NOVEMBER TOTAL
+  nov_total_qty,
+  ROUND(nov_total_gmv / 100000, 2) AS nov_total_gmv_lakhs,
+  nov_total_pdp,
+  nov_total_atc,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_total_atc, nov_total_pdp) * 100, 0), 2)
+    AS nov_total_pdp_to_atc_pct,
+  ROUND(COALESCE(SAFE_DIVIDE(nov_total_qty, nov_total_pdp) * 100, 0), 2)
+    AS nov_total_cvr_pct,
+  ROUND(nov_total_avg_inventory, 2) AS nov_total_avg_inventory,
+  ROUND(nov_total_avg_sp, 2) AS nov_total_avg_sp,
+
+  ROUND(nov_total_brand_offer_sp, 2) AS nov_total_avg_brand_offer_sp,
+
+  -- COMBINED GMV AND GRADING
+  ROUND(total_gmv / 100000, 2) AS total_gmv_lakhs,
+  ROUND(cumulative_gmv_share * 100, 2) AS cumulative_gmv_contribution_pct,
+  grade
+
+FROM graded
+
+ORDER BY
+  brand,
+  total_gmv DESC,
+  style_code;
